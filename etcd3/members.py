@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List
 
 
 class Member:
@@ -13,8 +13,14 @@ class Member:
                        communication
     """
 
-    def __init__(self, id: int, name: str, peer_urls: List[str], 
-                 client_urls: List[str], etcd_client=None):
+    def __init__(
+        self,
+        id: int,
+        name: str,
+        peer_urls: List[str],
+        client_urls: List[str],
+        etcd_client=None,
+    ):
         self.id = id
         self.name = name
         self.peer_urls = peer_urls
@@ -22,10 +28,10 @@ class Member:
         self._etcd_client = etcd_client
 
     def __str__(self) -> str:
-        return ('Member {id}: peer urls: {peer_urls}, client '
-                'urls: {client_urls}'.format(id=self.id,
-                                             peer_urls=self.peer_urls,
-                                             client_urls=self.client_urls))
+        return (
+            f"Member {self.id}: peer urls: {self.peer_urls}, client "
+            f"urls: {self.client_urls}"
+        )
 
     def remove(self) -> None:
         """Remove this member from the cluster."""

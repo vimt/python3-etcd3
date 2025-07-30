@@ -45,6 +45,8 @@ Issues = "https://github.com/vimt/python3-etcd/issues"
 dev = [
     "pytest>=6.0",
     "pytest-cov",
+    "hypothesis",
+    "tenacity",
     "mypy",
     "ruff",
 ]
@@ -55,6 +57,7 @@ version = {attr = "etcd3.__version__"}
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["etcd3*"]
+
 [tool.ruff]
 line-length = 88
 target-version = "py38"
@@ -70,6 +73,9 @@ select = [
     "UP", # pyupgrade
 ]
 ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"*_pb2*.py" = ["ALL"]
 
 [tool.ruff.format]
 quote-style = "double"

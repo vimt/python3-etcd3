@@ -2,7 +2,7 @@ def prefix_range_end(prefix):
     """Create a bytestring that can be used as a range_end for a prefix."""
     s = bytearray(prefix)
     for i in reversed(range(len(s))):
-        if s[i] < 0xff:
+        if s[i] < 0xFF:
             s[i] = s[i] + 1
             break
     return bytes(s)
@@ -18,13 +18,13 @@ def to_bytes(maybe_bytestring):
     if isinstance(maybe_bytestring, bytes):
         return maybe_bytestring
     else:
-        return maybe_bytestring.encode('utf-8')
+        return maybe_bytestring.encode("utf-8")
 
 
 def lease_to_id(lease):
     """Figure out if the argument is a Lease object, or the lease ID."""
     lease_id = 0
-    if hasattr(lease, 'id'):
+    if hasattr(lease, "id"):
         lease_id = lease.id
     else:
         try:
@@ -37,5 +37,4 @@ def lease_to_id(lease):
 def response_to_event_iterator(response_iterator):
     """Convert a watch response iterator to an event iterator."""
     for response in response_iterator:
-        for event in response.events:
-            yield event
+        yield from response.events

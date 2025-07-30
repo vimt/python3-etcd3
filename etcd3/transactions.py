@@ -1,11 +1,10 @@
-from . import etcdrpc
-from . import utils
+from . import etcdrpc, utils
 
 _OPERATORS = {
     etcdrpc.Compare.EQUAL: "==",
     etcdrpc.Compare.NOT_EQUAL: "!=",
     etcdrpc.Compare.LESS: "<",
-    etcdrpc.Compare.GREATER: ">"
+    etcdrpc.Compare.GREATER: ">",
 }
 
 
@@ -42,10 +41,8 @@ class BaseCompare:
         if self.range_end is None:
             keys = self.key
         else:
-            keys = "[{}, {})".format(self.key, self.range_end)
-        return "{}: {} {} '{}'".format(self.__class__, keys,
-                                       _OPERATORS.get(self.op),
-                                       self.value)
+            keys = f"[{self.key}, {self.range_end})"
+        return f"{self.__class__}: {keys} {_OPERATORS.get(self.op)} '{self.value}'"
 
     def build_message(self):
         compare = etcdrpc.Compare()
@@ -54,7 +51,7 @@ class BaseCompare:
             compare.range_end = utils.to_bytes(self.range_end)
 
         if self.op is None:
-            raise ValueError('op must be one of =, !=, < or >')
+            raise ValueError("op must be one of =, !=, < or >")
 
         compare.result = self.op
 

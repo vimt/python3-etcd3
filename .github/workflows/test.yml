@@ -1,0 +1,82 @@
+name: Tests
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+    
+    - name: Run unit tests
+      run: |
+        pytest tests/ -k "not TestEtcd3 and not TestAlarms and not TestFailoverClient and not test_user_pwd_auth and not test_compact" -v
+    
+    - name: Run linting
+      run: |
+        ruff check etcd3/ tests/
+    
+    - name: Run type checking
+      run: |
+        mypy etcd3/
+
+  integration-test:
+    runs-on: ubuntu-latest
+    services:
+      etcd:
+        image: quay.io/coreos/etcd:v3.4.10
+        env:
+          ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+          ETCD_ADVERTISE_CLIENT_URLS: http://0.0.0.0:2379
+          ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+          ETCD_INITIAL_ADVERTISE_PEER_URLS: http://0.0.0.0:2380
+          ETCD_INITIAL_CLUSTER: default=http://0.0.0.0:2380
+          ETCD_INITIAL_CLUSTER_TOKEN: etcd-cluster
+          ETCD_INITIAL_CLUSTER_STATE: new
+        ports:
+          - 2379:2379
+          - 2380:2380
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+    
+    - name: Wait for etcd
+      run: |
+        until curl -s http://localhost:2379/health; do
+          echo "Waiting for etcd..."
+          sleep 1
+        done
+    
+    - name: Run integration tests
+      run: |
+        PYTHON_ETCD_HTTP_URL=http://localhost:2379 pytest tests/ -k "TestEtcd3" -v --maxfail=5
+      env:
+        PYTHON_ETCD_HTTP_URL: http://localhost:2379

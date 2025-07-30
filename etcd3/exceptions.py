@@ -27,7 +27,7 @@ class PreconditionFailedError(Etcd3Exception):
 class RevisionCompactedError(Etcd3Exception):
     def __init__(self, compacted_revision):
         self.compacted_revision = compacted_revision
-        super(RevisionCompactedError, self).__init__()
+        super().__init__()
 
 
 class NoServerAvailableError(Etcd3Exception):

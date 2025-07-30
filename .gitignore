@@ -201,3 +201,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# claude
+.claude
+CLAUDE.md

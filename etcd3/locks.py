@@ -31,10 +31,9 @@ class Lock:
     :type ttl: int
     """
 
-    lock_prefix = '/locks/'
+    lock_prefix = "/locks/"
 
-    def __init__(self, name, ttl=60,
-                 etcd_client=None):
+    def __init__(self, name, ttl=60, etcd_client=None):
         self.name = name
         self.ttl = ttl
         if etcd_client is not None:
@@ -75,16 +74,11 @@ class Lock:
         self.lease = self.etcd_client.lease(self.ttl)
 
         success, metadata = self.etcd_client.transaction(
-            compare=[
-                self.etcd_client.transactions.create(self.key) == 0
-            ],
+            compare=[self.etcd_client.transactions.create(self.key) == 0],
             success=[
-                self.etcd_client.transactions.put(self.key, self.uuid,
-                                                  lease=self.lease)
+                self.etcd_client.transactions.put(self.key, self.uuid, lease=self.lease)
             ],
-            failure=[
-                self.etcd_client.transactions.get(self.key)
-            ]
+            failure=[self.etcd_client.transactions.get(self.key)],
         )
         if success is True:
             self.revision = metadata[0].response_put.header.revision
@@ -96,7 +90,8 @@ class Lock:
     def _wait_delete_event(self, timeout):
         try:
             event_iter, cancel = self.etcd_client.watch(
-                self.key, start_revision=self.revision + 1)
+                self.key, start_revision=self.revision + 1
+            )
         except exceptions.WatchTimedOut:
             return
 
@@ -117,11 +112,9 @@ class Lock:
     def release(self):
         """Release the lock."""
         success, _ = self.etcd_client.transaction(
-            compare=[
-                self.etcd_client.transactions.value(self.key) == self.uuid
-            ],
+            compare=[self.etcd_client.transactions.value(self.key) == self.uuid],
             success=[self.etcd_client.transactions.delete(self.key)],
-            failure=[]
+            failure=[],
         )
         return success
 
@@ -130,8 +123,10 @@ class Lock:
         if self.lease is not None:
             return self.lease.refresh()
         else:
-            raise ValueError('No lease associated with this lock - have you '
-                             'acquired the lock yet?')
+            raise ValueError(
+                "No lease associated with this lock - have you "
+                "acquired the lock yet?"
+            )
 
     def is_acquired(self):
         """Check if this lock is currently acquired."""

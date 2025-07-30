@@ -1,21 +1,15 @@
 import logging
 import queue
 import threading
-from typing import Iterator, Optional
 
 import grpc
 
-from . import etcdrpc
-from . import events
-from . import exceptions
-from . import utils
-
+from . import etcdrpc, events, exceptions, utils
 
 _log = logging.getLogger(__name__)
 
 
 class Watch:
-
     def __init__(self, watch_id, iterator=None, etcd_client=None):
         self.watch_id = watch_id
         self.etcd_client = etcd_client
@@ -28,13 +22,11 @@ class Watch:
         if self.iterator is not None:
             return self.iterator
 
-        raise ValueError('Undefined iterator')
+        raise ValueError("Undefined iterator")
 
 
 class Watcher:
-
-    def __init__(self, watchstub, timeout=None, call_credentials=None,
-                 metadata=None):
+    def __init__(self, watchstub, timeout=None, call_credentials=None, metadata=None):
         self.timeout = timeout
         self._watch_stub = watchstub
         self._credentials = call_credentials
@@ -48,9 +40,15 @@ class Watcher:
         self._new_watch = None
         self._stopping = False
 
-    def _create_watch_request(self, key, range_end=None, start_revision=None,
-                              progress_notify=False, filters=None,
-                              prev_kv=False):
+    def _create_watch_request(
+        self,
+        key,
+        range_end=None,
+        start_revision=None,
+        progress_notify=False,
+        filters=None,
+        prev_kv=False,
+    ):
         create_watch = etcdrpc.WatchCreateRequest()
         create_watch.key = utils.to_bytes(key)
         if range_end is not None:
@@ -65,12 +63,24 @@ class Watcher:
             create_watch.prev_kv = prev_kv
         return etcdrpc.WatchRequest(create_request=create_watch)
 
-    def add_callback(self, key, callback, range_end=None, start_revision=None,
-                     progress_notify=False, filters=None, prev_kv=False):
-        rq = self._create_watch_request(key, range_end=range_end,
-                                        start_revision=start_revision,
-                                        progress_notify=progress_notify,
-                                        filters=filters, prev_kv=prev_kv)
+    def add_callback(
+        self,
+        key,
+        callback,
+        range_end=None,
+        start_revision=None,
+        progress_notify=False,
+        filters=None,
+        prev_kv=False,
+    ):
+        rq = self._create_watch_request(
+            key,
+            range_end=range_end,
+            start_revision=start_revision,
+            progress_notify=progress_notify,
+            filters=filters,
+            prev_kv=prev_kv,
+        )
 
         with self._lock:
             # Wait for exiting thread to close
@@ -81,9 +91,10 @@ class Watcher:
 
             # Start the callback thread if it is not yet running.
             if not self._callback_thread:
-                thread_name = 'etcd3_watch_%x' % (id(self),)
-                self._callback_thread = threading.Thread(name=thread_name,
-                                                         target=self._run)
+                thread_name = f"etcd3_watch_{id(self):x}"
+                self._callback_thread = threading.Thread(
+                    name=thread_name, target=self._run
+                )
                 self._callback_thread.daemon = True
                 self._callback_thread.start()
 
@@ -130,7 +141,8 @@ class Watcher:
             response_iter = self._watch_stub.Watch(
                 _new_request_iter(self._request_queue),
                 credentials=self._credentials,
-                metadata=self._metadata)
+                metadata=self._metadata,
+            )
             for rs in response_iter:
                 self._handle_response(rs)
 
@@ -153,7 +165,7 @@ class Watcher:
                 self._request_queue.put(None)
                 self._request_queue = queue.Queue(maxsize=10)
 
-            for callback in six.itervalues(callbacks):
+            for callback in callbacks.values():
                 _safe_callback(callback, callback_err)
 
     def _handle_response(self, rs):
@@ -167,7 +179,8 @@ class Watcher:
 
                 if rs.compact_revision != 0:
                     self._new_watch.err = exceptions.RevisionCompactedError(
-                        rs.compact_revision)
+                        rs.compact_revision
+                    )
                     return
 
                 self._callbacks[rs.watch_id] = self._new_watch.callback
@@ -211,7 +224,6 @@ class Watcher:
 
 
 class WatchResponse:
-
     def __init__(self, header, events):
         self.header = header
         self.events = events
@@ -238,4 +250,4 @@ def _safe_callback(callback, response_or_err):
         callback(response_or_err)
 
     except Exception:
-        _log.exception('Watch callback failed')
+        _log.exception("Watch callback failed")

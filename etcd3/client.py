@@ -3,18 +3,12 @@ import queue
 import random
 import threading
 import time
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 
 import grpc
 import grpc._channel
 
-from . import etcdrpc
-from . import exceptions
-from . import leases
-from . import locks
-from . import transactions
-from . import utils
-from . import watch
+from . import etcdrpc, exceptions, leases, locks, transactions, utils, watch
 from .members import Member
 
 _EXCEPTIONS_BY_CODE = {
@@ -27,7 +21,7 @@ _EXCEPTIONS_BY_CODE = {
 _FAILED_EP_CODES = [
     grpc.StatusCode.UNAVAILABLE,
     grpc.StatusCode.DEADLINE_EXCEEDED,
-    grpc.StatusCode.INTERNAL
+    grpc.StatusCode.INTERNAL,
 ]
 
 
@@ -85,17 +79,21 @@ class Endpoint:
     :type opts: dict, optional
     """
 
-    def __init__(self, host: str, port: int, secure: bool = True, 
-                 creds: Optional[grpc.ChannelCredentials] = None, 
-                 time_retry: Union[int, float] = 300.0,
-                 opts: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        secure: bool = True,
+        creds: Optional[grpc.ChannelCredentials] = None,
+        time_retry: Union[int, float] = 300.0,
+        opts: Optional[Dict[str, Any]] = None,
+    ):
         self.host = host
-        self.netloc = "{host}:{port}".format(host=host, port=port)
+        self.netloc = f"{host}:{port}"
         self.secure = secure
-        self.protocol = 'https' if secure else 'http'
+        self.protocol = "https" if secure else "http"
         if self.secure and creds is None:
-            raise ValueError(
-                'Please set TLS credentials for secure connections')
+            raise ValueError("Please set TLS credentials for secure connections")
         self.credentials = creds
         self.time_retry = time_retry
         self.in_use = False
@@ -113,22 +111,21 @@ class Endpoint:
     def use(self) -> grpc.Channel:
         """Transition the endpoint to an active state."""
         if self.is_failed():
-            raise ValueError('Trying to use a failed node')
+            raise ValueError("Trying to use a failed node")
         self.in_use = True
         self.last_failed = 0
         return self.channel
 
     def __str__(self) -> str:
-        return "Endpoint({}://{})".format(self.protocol, self.netloc)
+        return f"Endpoint({self.protocol}://{self.netloc})"
 
     def is_failed(self) -> bool:
         """Check if the current endpoint is failed."""
-        return ((time.time() - self.last_failed) < self.time_retry)
+        return (time.time() - self.last_failed) < self.time_retry
 
     def _mkchannel(self, opts: Optional[Dict[str, Any]]) -> grpc.Channel:
         if self.secure:
-            return grpc.secure_channel(self.netloc, self.credentials,
-                                       options=opts)
+            return grpc.secure_channel(self.netloc, self.credentials, options=opts)
         else:
             return grpc.insecure_channel(self.netloc, options=opts)
 
@@ -140,7 +137,7 @@ class EtcdTokenCallCredentials(grpc.AuthMetadataPlugin):
         self._access_token = access_token
 
     def __call__(self, context, callback):
-        metadata = (('token', self._access_token),)
+        metadata = (("token", self._access_token),)
         callback(metadata, None)
 
 
@@ -165,12 +162,14 @@ class MultiEndpointEtcd3Client:
     :param bool failover: Failover between endpoints, default False
     """
 
-    def __init__(self, endpoints: Optional[List[Endpoint]] = None, 
-                 timeout: Optional[Union[int, float]] = None, 
-                 user: Optional[str] = None, 
-                 password: Optional[str] = None,
-                 failover: bool = False):
-
+    def __init__(
+        self,
+        endpoints: Optional[List[Endpoint]] = None,
+        timeout: Optional[Union[int, float]] = None,
+        user: Optional[str] = None,
+        password: Optional[str] = None,
+        failover: bool = False,
+    ):
         self.metadata = None
         self.failover = failover
 
@@ -179,9 +178,7 @@ class MultiEndpointEtcd3Client:
 
         # Step 1: setup endpoints
         self.endpoints = {ep.netloc: ep for ep in endpoints}
-        self._current_endpoint_label = random.choice(
-            list(self.endpoints.keys())
-        )
+        self._current_endpoint_label = random.choice(list(self.endpoints.keys()))
 
         # Step 2: if auth is enabled, call the auth endpoint
         self.timeout = timeout
@@ -189,20 +186,18 @@ class MultiEndpointEtcd3Client:
         cred_params = [c is not None for c in (user, password)]
 
         if all(cred_params):
-            auth_request = etcdrpc.AuthenticateRequest(
-                name=user,
-                password=password
-            )
+            auth_request = etcdrpc.AuthenticateRequest(name=user, password=password)
 
             resp = self.authstub.Authenticate(auth_request, self.timeout)
-            self.metadata = (('token', resp.token),)
+            self.metadata = (("token", resp.token),)
             self.call_credentials = grpc.metadata_call_credentials(
-                EtcdTokenCallCredentials(resp.token))
+                EtcdTokenCallCredentials(resp.token)
+            )
 
         elif any(cred_params):
             raise Exception(
-                'if using authentication credentials both user and password '
-                'must be specified.'
+                "if using authentication credentials both user and password "
+                "must be specified."
             )
 
         self.transactions = Transactions()
@@ -220,9 +215,7 @@ class MultiEndpointEtcd3Client:
     kvstub = _create_stub_property("kvstub", etcdrpc.KVStub)
     clusterstub = _create_stub_property("clusterstub", etcdrpc.ClusterStub)
     leasestub = _create_stub_property("leasestub", etcdrpc.LeaseStub)
-    maintenancestub = _create_stub_property(
-        "maintenancestub", etcdrpc.MaintenanceStub
-    )
+    maintenancestub = _create_stub_property("maintenancestub", etcdrpc.MaintenanceStub)
 
     def get_watcher(self):
         watchstub = etcdrpc.WatchStub(self.channel)
@@ -230,7 +223,7 @@ class MultiEndpointEtcd3Client:
             watchstub,
             timeout=self.timeout,
             call_credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
     @property
@@ -287,8 +280,7 @@ class MultiEndpointEtcd3Client:
                 continue
             self._current_endpoint_label = label
             return self.channel
-        raise exceptions.NoServerAvailableError(
-            "No endpoint available and not failed")
+        raise exceptions.NoServerAvailableError("No endpoint available and not failed")
 
     def close(self):
         """Call the GRPC channel close semantics."""
@@ -309,22 +301,18 @@ class MultiEndpointEtcd3Client:
         cert_key_file = None
         cert_cert_file = None
 
-        with open(ca_cert, 'rb') as f:
+        with open(ca_cert, "rb") as f:
             ca_cert_file = f.read()
 
         if cert_key is not None:
-            with open(cert_key, 'rb') as f:
+            with open(cert_key, "rb") as f:
                 cert_key_file = f.read()
 
         if cert_cert is not None:
-            with open(cert_cert, 'rb') as f:
+            with open(cert_cert, "rb") as f:
                 cert_cert_file = f.read()
 
-        return grpc.ssl_channel_credentials(
-            ca_cert_file,
-            cert_key_file,
-            cert_cert_file
-        )
+        return grpc.ssl_channel_credentials(ca_cert_file, cert_key_file, cert_cert_file)
 
     def _manage_grpc_errors(self, exc):
         code = exc.code()
@@ -353,26 +341,28 @@ class MultiEndpointEtcd3Client:
         @functools.wraps(payload)
         def handler(self, *args, **kwargs):
             try:
-                for item in payload(self, *args, **kwargs):
-                    yield item
+                yield from payload(self, *args, **kwargs)
             except grpc.RpcError as exc:
                 self._manage_grpc_errors(exc)
 
         return handler
 
-    def _build_get_range_request(self, key,
-                                 range_end=None,
-                                 limit=None,
-                                 revision=None,
-                                 sort_order=None,
-                                 sort_target='key',
-                                 serializable=False,
-                                 keys_only=False,
-                                 count_only=False,
-                                 min_mod_revision=None,
-                                 max_mod_revision=None,
-                                 min_create_revision=None,
-                                 max_create_revision=None):
+    def _build_get_range_request(
+        self,
+        key,
+        range_end=None,
+        limit=None,
+        revision=None,
+        sort_order=None,
+        sort_target="key",
+        serializable=False,
+        keys_only=False,
+        count_only=False,
+        min_mod_revision=None,
+        max_mod_revision=None,
+        min_create_revision=None,
+        max_create_revision=None,
+    ):
         range_request = etcdrpc.RangeRequest()
         range_request.key = utils.to_bytes(key)
         range_request.keys_only = keys_only
@@ -396,26 +386,28 @@ class MultiEndpointEtcd3Client:
 
         sort_orders = {
             None: etcdrpc.RangeRequest.NONE,
-            'ascend': etcdrpc.RangeRequest.ASCEND,
-            'descend': etcdrpc.RangeRequest.DESCEND,
+            "ascend": etcdrpc.RangeRequest.ASCEND,
+            "descend": etcdrpc.RangeRequest.DESCEND,
         }
         request_sort_order = sort_orders.get(sort_order)
         if request_sort_order is None:
-            raise ValueError('unknown sort order: "{}"'.format(sort_order))
+            raise ValueError(f'unknown sort order: "{sort_order}"')
         range_request.sort_order = request_sort_order
 
         sort_targets = {
             None: etcdrpc.RangeRequest.KEY,
-            'key': etcdrpc.RangeRequest.KEY,
-            'version': etcdrpc.RangeRequest.VERSION,
-            'create': etcdrpc.RangeRequest.CREATE,
-            'mod': etcdrpc.RangeRequest.MOD,
-            'value': etcdrpc.RangeRequest.VALUE,
+            "key": etcdrpc.RangeRequest.KEY,
+            "version": etcdrpc.RangeRequest.VERSION,
+            "create": etcdrpc.RangeRequest.CREATE,
+            "mod": etcdrpc.RangeRequest.MOD,
+            "value": etcdrpc.RangeRequest.VALUE,
         }
         request_sort_target = sort_targets.get(sort_target)
         if request_sort_target is None:
-            raise ValueError('sort_target must be one of "key", '
-                             '"version", "create", "mod" or "value"')
+            raise ValueError(
+                'sort_target must be one of "key", '
+                '"version", "create", "mod" or "value"'
+            )
         range_request.sort_target = request_sort_target
 
         return range_request
@@ -423,16 +415,13 @@ class MultiEndpointEtcd3Client:
     @_handle_errors
     def get_response(self, key, **kwargs):
         """Get the value of a key from etcd."""
-        range_request = self._build_get_range_request(
-            key,
-            **kwargs
-        )
+        range_request = self._build_get_range_request(key, **kwargs)
 
         return self.kvstub.Range(
             range_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
     def get(self, key, **kwargs):
@@ -468,14 +457,14 @@ class MultiEndpointEtcd3Client:
         range_request = self._build_get_range_request(
             key=key_prefix,
             range_end=utils.prefix_range_end(utils.to_bytes(key_prefix)),
-            **kwargs
+            **kwargs,
         )
 
         return self.kvstub.Range(
             range_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
     def get_prefix(self, key_prefix, **kwargs):
@@ -494,22 +483,23 @@ class MultiEndpointEtcd3Client:
         )
 
     @_handle_errors
-    def get_range_response(self, range_start, range_end, sort_order=None,
-                           sort_target='key', **kwargs):
+    def get_range_response(
+        self, range_start, range_end, sort_order=None, sort_target="key", **kwargs
+    ):
         """Get a range of keys."""
         range_request = self._build_get_range_request(
             key=range_start,
             range_end=range_end,
             sort_order=sort_order,
             sort_target=sort_target,
-            **kwargs
+            **kwargs,
         )
 
         return self.kvstub.Range(
             range_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
     def get_range(self, range_start, range_end, **kwargs):
@@ -520,18 +510,16 @@ class MultiEndpointEtcd3Client:
         :param range_end: last key in range
         :returns: sequence of (value, metadata) tuples
         """
-        range_response = self.get_range_response(range_start, range_end,
-                                                 **kwargs)
+        range_response = self.get_range_response(range_start, range_end, **kwargs)
         for kv in range_response.kvs:
             yield (kv.value, KVMetadata(kv, range_response.header))
 
     @_handle_errors
-    def get_all_response(self, sort_order=None, sort_target='key',
-                         keys_only=False):
+    def get_all_response(self, sort_order=None, sort_target="key", keys_only=False):
         """Get all keys currently stored in etcd."""
         range_request = self._build_get_range_request(
-            key=b'\0',
-            range_end=b'\0',
+            key=b"\0",
+            range_end=b"\0",
             sort_order=sort_order,
             sort_target=sort_target,
             keys_only=keys_only,
@@ -541,7 +529,7 @@ class MultiEndpointEtcd3Client:
             range_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
     def get_all(self, **kwargs):
@@ -587,13 +575,12 @@ class MultiEndpointEtcd3Client:
         :returns: a response containing a header and the prev_kv
         :rtype: :class:`.rpc_pb2.PutResponse`
         """
-        put_request = self._build_put_request(key, value, lease=lease,
-                                              prev_kv=prev_kv)
+        put_request = self._build_put_request(key, value, lease=lease, prev_kv=prev_kv)
         return self.kvstub.Put(
             put_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
     @_handle_errors
@@ -614,7 +601,7 @@ class MultiEndpointEtcd3Client:
         :rtype: bool
         """
         status, _ = self.transaction(
-            compare=[self.transactions.create(key) == '0'],
+            compare=[self.transactions.create(key) == "0"],
             success=[self.transactions.put(key, value, lease=lease)],
             failure=[],
         )
@@ -647,9 +634,7 @@ class MultiEndpointEtcd3Client:
 
         return status
 
-    def _build_delete_request(self, key,
-                              range_end=None,
-                              prev_kv=False):
+    def _build_delete_request(self, key, range_end=None, prev_kv=False):
         delete_request = etcdrpc.DeleteRangeRequest()
         delete_request.key = utils.to_bytes(key)
         delete_request.prev_kv = prev_kv
@@ -679,7 +664,7 @@ class MultiEndpointEtcd3Client:
             delete_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
         if return_response:
             return delete_response
@@ -689,14 +674,13 @@ class MultiEndpointEtcd3Client:
     def delete_prefix(self, prefix):
         """Delete a range of keys with a prefix in etcd."""
         delete_request = self._build_delete_request(
-            prefix,
-            range_end=utils.prefix_range_end(utils.to_bytes(prefix))
+            prefix, range_end=utils.prefix_range_end(utils.to_bytes(prefix))
         )
         return self.kvstub.DeleteRange(
             delete_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
     @_handle_errors
@@ -707,7 +691,7 @@ class MultiEndpointEtcd3Client:
             status_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
         for m in self.members:
@@ -718,11 +702,13 @@ class MultiEndpointEtcd3Client:
             # raise exception?
             leader = None
 
-        return Status(status_response.version,
-                      status_response.dbSize,
-                      leader,
-                      status_response.raftIndex,
-                      status_response.raftTerm)
+        return Status(
+            status_response.version,
+            status_response.dbSize,
+            leader,
+            status_response.raftIndex,
+            status_response.raftTerm,
+        )
 
     @_handle_errors
     def add_watch_callback(self, *args, **kwargs):
@@ -757,8 +743,7 @@ class MultiEndpointEtcd3Client:
 
         :returns: watch_id. Later it could be used for cancelling watch.
         """
-        kwargs['range_end'] = \
-            utils.prefix_range_end(utils.to_bytes(key_prefix))
+        kwargs["range_end"] = utils.prefix_range_end(utils.to_bytes(key_prefix))
 
         return self.add_watch_callback(key_prefix, callback, **kwargs)
 
@@ -838,8 +823,7 @@ class MultiEndpointEtcd3Client:
 
         :returns: tuple of ``responses_iterator`` and ``cancel``.
         """
-        kwargs['range_end'] = \
-            utils.prefix_range_end(utils.to_bytes(key_prefix))
+        kwargs["range_end"] = utils.prefix_range_end(utils.to_bytes(key_prefix))
         return self.watch_response(key_prefix, **kwargs)
 
     def watch_prefix(self, key_prefix, **kwargs):
@@ -850,8 +834,7 @@ class MultiEndpointEtcd3Client:
 
         :returns: tuple of ``events_iterator`` and ``cancel``.
         """
-        kwargs['range_end'] = \
-            utils.prefix_range_end(utils.to_bytes(key_prefix))
+        kwargs["range_end"] = utils.prefix_range_end(utils.to_bytes(key_prefix))
         return self.watch(key_prefix, **kwargs)
 
     @_handle_errors
@@ -903,8 +886,7 @@ class MultiEndpointEtcd3Client:
         If the timeout was specified and response didn't arrive method
         will raise ``WatchTimedOut`` exception.
         """
-        kwargs['range_end'] = \
-            utils.prefix_range_end(utils.to_bytes(key_prefix))
+        kwargs["range_end"] = utils.prefix_range_end(utils.to_bytes(key_prefix))
         return self.watch_once_response(key_prefix, timeout=timeout, **kwargs)
 
     def watch_prefix_once(self, key_prefix, timeout=None, **kwargs):
@@ -914,8 +896,7 @@ class MultiEndpointEtcd3Client:
         If the timeout was specified and event didn't arrive method
         will raise ``WatchTimedOut`` exception.
         """
-        kwargs['range_end'] = \
-            utils.prefix_range_end(utils.to_bytes(key_prefix))
+        kwargs["range_end"] = utils.prefix_range_end(utils.to_bytes(key_prefix))
         return self.watch_once(key_prefix, timeout=timeout, **kwargs)
 
     @_handle_errors
@@ -937,8 +918,9 @@ class MultiEndpointEtcd3Client:
         request_ops = []
         for op in ops:
             if isinstance(op, transactions.Put):
-                request = self._build_put_request(op.key, op.value,
-                                                  op.lease, op.prev_kv)
+                request = self._build_put_request(
+                    op.key, op.value, op.lease, op.prev_kv
+                )
                 request_op = etcdrpc.RequestOp(request_put=request)
                 request_ops.append(request_op)
 
@@ -948,8 +930,7 @@ class MultiEndpointEtcd3Client:
                 request_ops.append(request_op)
 
             elif isinstance(op, transactions.Delete):
-                request = self._build_delete_request(op.key, op.range_end,
-                                                     op.prev_kv)
+                request = self._build_delete_request(op.key, op.range_end, op.prev_kv)
                 request_op = etcdrpc.RequestOp(request_delete_range=request)
                 request_ops.append(request_op)
 
@@ -957,15 +938,14 @@ class MultiEndpointEtcd3Client:
                 compare = [c.build_message() for c in op.compare]
                 success_ops = self._ops_to_requests(op.success)
                 failure_ops = self._ops_to_requests(op.failure)
-                request = etcdrpc.TxnRequest(compare=compare,
-                                             success=success_ops,
-                                             failure=failure_ops)
+                request = etcdrpc.TxnRequest(
+                    compare=compare, success=success_ops, failure=failure_ops
+                )
                 request_op = etcdrpc.RequestOp(request_txn=request)
                 request_ops.append(request_op)
 
             else:
-                raise Exception(
-                    'Unknown request class {}'.format(op.__class__))
+                raise Exception(f"Unknown request class {op.__class__}")
         return request_ops
 
     @_handle_errors
@@ -1002,28 +982,30 @@ class MultiEndpointEtcd3Client:
         success_ops = self._ops_to_requests(success)
         failure_ops = self._ops_to_requests(failure)
 
-        transaction_request = etcdrpc.TxnRequest(compare=compare,
-                                                 success=success_ops,
-                                                 failure=failure_ops)
+        transaction_request = etcdrpc.TxnRequest(
+            compare=compare, success=success_ops, failure=failure_ops
+        )
         txn_response = self.kvstub.Txn(
             transaction_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
         responses = []
         for response in txn_response.responses:
-            response_type = response.WhichOneof('response')
-            if response_type in ['response_put', 'response_delete_range',
-                                 'response_txn']:
+            response_type = response.WhichOneof("response")
+            if response_type in [
+                "response_put",
+                "response_delete_range",
+                "response_txn",
+            ]:
                 responses.append(response)
 
-            elif response_type == 'response_range':
+            elif response_type == "response_range":
                 range_kvs = []
                 for kv in response.response_range.kvs:
-                    range_kvs.append((kv.value,
-                                      KVMetadata(kv, txn_response.header)))
+                    range_kvs.append((kv.value, KVMetadata(kv, txn_response.header)))
 
                 responses.append(range_kvs)
 
@@ -1049,11 +1031,13 @@ class MultiEndpointEtcd3Client:
             lease_grant_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
-        return leases.Lease(lease_id=lease_grant_response.ID,
-                            ttl=lease_grant_response.TTL,
-                            etcd_client=self)
+        return leases.Lease(
+            lease_id=lease_grant_response.ID,
+            ttl=lease_grant_response.TTL,
+            etcd_client=self,
+        )
 
     @_handle_errors
     def revoke_lease(self, lease_id):
@@ -1067,30 +1051,29 @@ class MultiEndpointEtcd3Client:
             lease_revoke_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
     @_handle_generator_errors
     def refresh_lease(self, lease_id):
         keep_alive_request = etcdrpc.LeaseKeepAliveRequest(ID=lease_id)
         request_stream = [keep_alive_request]
-        for response in self.leasestub.LeaseKeepAlive(
-                iter(request_stream),
-                self.timeout,
-                credentials=self.call_credentials,
-                metadata=self.metadata):
-            yield response
+        yield from self.leasestub.LeaseKeepAlive(
+            iter(request_stream),
+            self.timeout,
+            credentials=self.call_credentials,
+            metadata=self.metadata,
+        )
 
     @_handle_errors
     def get_lease_info(self, lease_id):
         # only available in etcd v3.1.0 and later
-        ttl_request = etcdrpc.LeaseTimeToLiveRequest(ID=lease_id,
-                                                     keys=True)
+        ttl_request = etcdrpc.LeaseTimeToLiveRequest(ID=lease_id, keys=True)
         return self.leasestub.LeaseTimeToLive(
             ttl_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
     @_handle_errors
@@ -1123,15 +1106,13 @@ class MultiEndpointEtcd3Client:
             member_add_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
         member = member_add_response.member
-        return Member(member.ID,
-                      member.name,
-                      member.peerURLs,
-                      member.clientURLs,
-                      etcd_client=self)
+        return Member(
+            member.ID, member.name, member.peerURLs, member.clientURLs, etcd_client=self
+        )
 
     @_handle_errors
     def remove_member(self, member_id):
@@ -1145,7 +1126,7 @@ class MultiEndpointEtcd3Client:
             member_rm_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
     @_handle_errors
@@ -1157,13 +1138,14 @@ class MultiEndpointEtcd3Client:
         :param peer_urls: new list of peer urls the member will use to
                           communicate with the cluster
         """
-        member_update_request = etcdrpc.MemberUpdateRequest(ID=member_id,
-                                                            peerURLs=peer_urls)
+        member_update_request = etcdrpc.MemberUpdateRequest(
+            ID=member_id, peerURLs=peer_urls
+        )
         self.clusterstub.MemberUpdate(
             member_update_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
     @property
@@ -1179,15 +1161,17 @@ class MultiEndpointEtcd3Client:
             member_list_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
         for member in member_list_response.members:
-            yield Member(member.ID,
-                         member.name,
-                         member.peerURLs,
-                         member.clientURLs,
-                         etcd_client=self)
+            yield Member(
+                member.ID,
+                member.name,
+                member.peerURLs,
+                member.clientURLs,
+                etcd_client=self,
+            )
 
     @_handle_errors
     def compact(self, revision, physical=False):
@@ -1203,13 +1187,14 @@ class MultiEndpointEtcd3Client:
                          such that compacted entries are totally removed from
                          the backend database
         """
-        compact_request = etcdrpc.CompactionRequest(revision=revision,
-                                                    physical=physical)
+        compact_request = etcdrpc.CompactionRequest(
+            revision=revision, physical=physical
+        )
         self.kvstub.Compact(
             compact_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
     @_handle_errors
@@ -1220,7 +1205,7 @@ class MultiEndpointEtcd3Client:
             defrag_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
     @_handle_errors
@@ -1237,23 +1222,23 @@ class MultiEndpointEtcd3Client:
     def _build_alarm_request(self, alarm_action, member_id, alarm_type):
         alarm_request = etcdrpc.AlarmRequest()
 
-        if alarm_action == 'get':
+        if alarm_action == "get":
             alarm_request.action = etcdrpc.AlarmRequest.GET
-        elif alarm_action == 'activate':
+        elif alarm_action == "activate":
             alarm_request.action = etcdrpc.AlarmRequest.ACTIVATE
-        elif alarm_action == 'deactivate':
+        elif alarm_action == "deactivate":
             alarm_request.action = etcdrpc.AlarmRequest.DEACTIVATE
         else:
-            raise ValueError('Unknown alarm action: {}'.format(alarm_action))
+            raise ValueError(f"Unknown alarm action: {alarm_action}")
 
         alarm_request.memberID = member_id
 
-        if alarm_type == 'none':
+        if alarm_type == "none":
             alarm_request.alarm = etcdrpc.NONE
-        elif alarm_type == 'no space':
+        elif alarm_type == "no space":
             alarm_request.alarm = etcdrpc.NOSPACE
         else:
-            raise ValueError('Unknown alarm type: {}'.format(alarm_type))
+            raise ValueError(f"Unknown alarm type: {alarm_type}")
 
         return alarm_request
 
@@ -1269,21 +1254,18 @@ class MultiEndpointEtcd3Client:
                           of the cluster.
         :returns: list of :class:`.Alarm`
         """
-        alarm_request = self._build_alarm_request('activate',
-                                                  member_id,
-                                                  'no space')
+        alarm_request = self._build_alarm_request("activate", member_id, "no space")
         alarm_response = self.maintenancestub.Alarm(
             alarm_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
-        return [Alarm(alarm.alarm, alarm.memberID)
-                for alarm in alarm_response.alarms]
+        return [Alarm(alarm.alarm, alarm.memberID) for alarm in alarm_response.alarms]
 
     @_handle_errors
-    def list_alarms(self, member_id=0, alarm_type='none'):
+    def list_alarms(self, member_id=0, alarm_type="none"):
         """List the activated alarms.
 
         :param member_id:
@@ -1292,14 +1274,12 @@ class MultiEndpointEtcd3Client:
                            of the cluster.
         :returns: sequence of :class:`.Alarm`
         """
-        alarm_request = self._build_alarm_request('get',
-                                                  member_id,
-                                                  alarm_type)
+        alarm_request = self._build_alarm_request("get", member_id, alarm_type)
         alarm_response = self.maintenancestub.Alarm(
             alarm_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
         for alarm in alarm_response.alarms:
@@ -1314,18 +1294,15 @@ class MultiEndpointEtcd3Client:
                           of the cluster.
         :returns: List of :class:`.Alarm`
         """
-        alarm_request = self._build_alarm_request('deactivate',
-                                                  member_id,
-                                                  'no space')
+        alarm_request = self._build_alarm_request("deactivate", member_id, "no space")
         alarm_response = self.maintenancestub.Alarm(
             alarm_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
-        return [Alarm(alarm.alarm, alarm.memberID)
-                for alarm in alarm_response.alarms]
+        return [Alarm(alarm.alarm, alarm.memberID) for alarm in alarm_response.alarms]
 
     @_handle_errors
     def snapshot(self, file_obj):
@@ -1338,7 +1315,7 @@ class MultiEndpointEtcd3Client:
             snapshot_request,
             self.timeout,
             credentials=self.call_credentials,
-            metadata=self.metadata
+            metadata=self.metadata,
         )
 
         for response in snapshot_response:
@@ -1369,25 +1346,30 @@ class Etcd3Client(MultiEndpointEtcd3Client):
     :type grpc_options: dict, optional
     """
 
-    def __init__(self, host='localhost', port=2379, ca_cert=None,
-                 cert_key=None, cert_cert=None, timeout=None, user=None,
-                 password=None, grpc_options=None):
-
+    def __init__(
+        self,
+        host="localhost",
+        port=2379,
+        ca_cert=None,
+        cert_key=None,
+        cert_cert=None,
+        timeout=None,
+        user=None,
+        password=None,
+        grpc_options=None,
+    ):
         # Step 1: verify credentials
         cert_params = [c is not None for c in (cert_cert, cert_key)]
         if ca_cert is not None:
             if all(cert_params):
-                credentials = self.get_secure_creds(
-                    ca_cert,
-                    cert_key,
-                    cert_cert
-                )
+                credentials = self.get_secure_creds(ca_cert, cert_key, cert_cert)
                 self.uses_secure_channel = True
             elif any(cert_params):
                 # some of the cert parameters are set
                 raise ValueError(
-                    'to use a secure channel ca_cert is required by itself, '
-                    'or cert_cert and cert_key must both be specified.')
+                    "to use a secure channel ca_cert is required by itself, "
+                    "or cert_cert and cert_key must both be specified."
+                )
             else:
                 credentials = self.get_secure_creds(ca_cert, None, None)
                 self.uses_secure_channel = True
@@ -1396,23 +1378,37 @@ class Etcd3Client(MultiEndpointEtcd3Client):
             credentials = None
 
         # Step 2: create Endpoint
-        ep = Endpoint(host, port, secure=self.uses_secure_channel,
-                      creds=credentials, opts=grpc_options)
+        ep = Endpoint(
+            host,
+            port,
+            secure=self.uses_secure_channel,
+            creds=credentials,
+            opts=grpc_options,
+        )
 
-        super(Etcd3Client, self).__init__(endpoints=[ep], timeout=timeout,
-                                          user=user, password=password)
+        super().__init__(endpoints=[ep], timeout=timeout, user=user, password=password)
 
 
-def client(host='localhost', port=2379,
-           ca_cert=None, cert_key=None, cert_cert=None, timeout=None,
-           user=None, password=None, grpc_options=None):
+def client(
+    host="localhost",
+    port=2379,
+    ca_cert=None,
+    cert_key=None,
+    cert_cert=None,
+    timeout=None,
+    user=None,
+    password=None,
+    grpc_options=None,
+):
     """Return an instance of an Etcd3Client."""
-    return Etcd3Client(host=host,
-                       port=port,
-                       ca_cert=ca_cert,
-                       cert_key=cert_key,
-                       cert_cert=cert_cert,
-                       timeout=timeout,
-                       user=user,
-                       password=password,
-                       grpc_options=grpc_options)
+    return Etcd3Client(
+        host=host,
+        port=port,
+        ca_cert=ca_cert,
+        cert_key=cert_key,
+        cert_cert=cert_cert,
+        timeout=timeout,
+        user=user,
+        password=password,
+        grpc_options=grpc_options,
+    )
