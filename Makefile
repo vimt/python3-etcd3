@@ -1,18 +1,17 @@
-.PHONY: test test-unit test-integration install-dev lint format clean build
+.PHONY: test test-unit test-integration test-cluster install-dev lint format clean build pifpaf-start pifpaf-stop pifpaf-status
 
 # 安装开发依赖
 install-dev:
 	python -m pip install -e ".[dev]"
+	python -m pip install pifpaf
 
-# 运行单元测试（不需要 etcd 服务器）
-test-unit:
-	python -m pytest tests/ -k "not TestEtcd3 and not TestAlarms and not TestFailoverClient and not test_user_pwd_auth and not test_compact" -v
+# 使用 pifpaf 集群运行所有测试
+test-cluster:
+	@echo "Running tests with pifpaf etcd cluster..."
+	PYTHON_ETCD_HTTP_URL=http://127.0.0.1:2479 pifpaf run etcd --cluster --port 2479 --peer-port 2480 -- python -m pytest tests/ -v
+	@echo "Tests completed, cluster automatically stopped"
 
-# 运行集成测试（需要 etcd 服务器）
-test-integration:
-	python -m pytest tests/ -k "TestEtcd3 or TestAlarms or TestFailoverClient" -v
-
-# 运行所有测试
+# 运行所有测试（使用当前环境的 etcd）
 test:
 	python -m pytest tests/ -v
 
