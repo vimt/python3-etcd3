@@ -8,7 +8,6 @@ import pytest
 
 from tests.conftest import TestBase
 
-
 int_types = (int,)
 etcd_version = "v3.5"  # Assume recent version for now
 
@@ -47,6 +46,7 @@ class TestLeases(TestBase):
         lease = etcd.lease(1)
         etcd.put(key, "this is a lease", lease=lease)
         import etcd3.utils as utils
+
         assert lease.keys == [utils.to_bytes(key)]
         v, _ = etcd.get(key)
         assert v == b"this is a lease"

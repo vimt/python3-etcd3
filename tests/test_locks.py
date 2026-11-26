@@ -5,6 +5,8 @@ Tests for lock functionality.
 import time
 from unittest import mock
 
+import pytest
+
 import etcd3
 from tests.conftest import TestBase
 
@@ -124,3 +126,8 @@ class TestLocks(TestBase):
 
         # transaction must be called once for lock1, twice for lock2
         assert transaction_called[0] == 3
+
+    def test_lock_refresh_before_acquire_raises(self, etcd):
+        lock = etcd.lock("lock-not-acquired")
+        with pytest.raises(ValueError, match="No lease"):
+            lock.refresh()

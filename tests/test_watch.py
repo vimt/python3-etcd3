@@ -76,7 +76,9 @@ class TestWatch(TestBase):
         t.join()
 
     def test_watch_key_with_revision_compacted(self, etcd):
-        etcd.put("/random", "1")  # Some data to compact
+        # Some data to compact; revisions are relative so the test does not
+        # depend on running against a freshly started etcd
+        compact_revision = etcd.put("/random", "1").header.revision
 
         def update_etcd(v):
             etcd.put("/watchcompation", v)
@@ -111,7 +113,7 @@ class TestWatch(TestBase):
                 compacted_revision = err.compacted_revision
 
             assert error_raised is True
-            assert compacted_revision == 2
+            assert compacted_revision == compact_revision
 
             change_count = 0
             events_iterator, cancel = etcd.watch(
@@ -129,7 +131,7 @@ class TestWatch(TestBase):
                     cancel()
 
         # Compact etcd and test watcher
-        etcd.compact(2)
+        etcd.compact(compact_revision)
 
         watch_compacted_revision_test()
 
@@ -348,3 +350,61 @@ class TestWatch(TestBase):
                 assert event.key == utils.to_bytes(f"/doot/watch/prefix/{count}")
                 assert event.value == utils.to_bytes(str(count))
                 count += 1
+
+    def test_watch_prev_kv(self, etcd):
+        etcd.put("/doot/prev", "old")
+        events, cancel = etcd.watch("/doot/prev", prev_kv=True)
+        etcd.put("/doot/prev", "new")
+        event = next(events)
+        cancel()
+        assert isinstance(event, etcd3.events.PutEvent)
+        assert event.value == b"new"
+        assert event.prev_value == b"old"
+        assert "/doot/prev" in str(event)
+
+    def test_watch_delete_event(self, etcd):
+        etcd.put("/doot/del", "v")
+        events, cancel = etcd.watch("/doot/del")
+        etcd.delete("/doot/del")
+        event = next(events)
+        cancel()
+        assert isinstance(event, etcd3.events.DeleteEvent)
+        assert event.key == b"/doot/del"
+
+    def test_watch_once(self, etcd):
+        t = threading.Timer(0.5, etcd.put, args=("/doot/once", "1"))
+        t.start()
+        event = etcd.watch_once("/doot/once", timeout=5)
+        t.join()
+        assert event.value == b"1"
+
+    def test_watch_once_timeout(self, etcd):
+        with pytest.raises(etcd3.exceptions.WatchTimedOut):
+            etcd.watch_once("/doot/never", timeout=0.5)
+
+    def test_watch_prefix_once(self, etcd):
+        t = threading.Timer(0.5, etcd.put, args=("/doot/pfx/a", "1"))
+        t.start()
+        event = etcd.watch_prefix_once("/doot/pfx/", timeout=5)
+        t.join()
+        assert event.key == b"/doot/pfx/a"
+
+    def test_failing_callback_is_logged_and_watch_continues(self, etcd, caplog):
+        seen = []
+
+        def callback(response):
+            seen.append(response)
+            if len(seen) == 1:
+                raise RuntimeError("boom")
+
+        watch_id = etcd.add_watch_callback("/doot/cb", callback)
+        try:
+            etcd.put("/doot/cb", "1")
+            etcd.put("/doot/cb", "2")
+            deadline = time.time() + 5
+            while len(seen) < 2 and time.time() < deadline:
+                time.sleep(0.05)
+        finally:
+            etcd.cancel_watch(watch_id)
+        assert len(seen) == 2
+        assert "Watch callback failed" in caplog.text

@@ -40,6 +40,7 @@ class TestRangeOperations(TestBase):
             etcd.put(f"/doot/range{i}", "i am a range")
 
         from tests.conftest import _out_quorum
+
         with _out_quorum():
             values = list(
                 etcd.get_prefix("/doot/range", keys_only=True, serializable=True)
@@ -148,6 +149,24 @@ class TestRangeOperations(TestBase):
                 assert len(resp.kvs) == 1
             else:
                 assert len(resp.kvs) == 0
+
+    def test_get_min_max_create_revision(self, etcd):
+        create_a = etcd.put("/doot/a", "1").header.revision
+        create_b = etcd.put("/doot/b", "2").header.revision
+        # Modifying "a" bumps its mod_revision past create_b; its
+        # create_revision stays create_a. A filter that wrongly uses
+        # mod_revision would therefore match both keys.
+        etcd.put("/doot/a", "3")
+
+        def keys(**kwargs):
+            return sorted(meta.key for _, meta in etcd.get_prefix("/doot", **kwargs))
+
+        assert keys(min_create_revision=create_b) == [b"/doot/b"]
+        assert keys(max_create_revision=create_a) == [b"/doot/a"]
+        assert keys(min_create_revision=create_a, max_create_revision=create_b) == [
+            b"/doot/a",
+            b"/doot/b",
+        ]
 
     def test_sort_order(self, etcd):
         def remove_prefix(string, prefix):

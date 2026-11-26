@@ -2,10 +2,14 @@
 Tests for basic KV operations (get, put, delete).
 """
 
-from hypothesis import given, HealthCheck, settings
+import pytest
+from hypothesis import given
 from hypothesis.strategies import characters
 
-from tests.conftest import TestBase
+from tests.conftest import TestBase, _out_quorum
+
+# hypothesis tests get a clean etcd per example instead of the `etcd` fixture
+pytestmark = pytest.mark.integration
 
 
 class TestKVOperations(TestBase):
@@ -15,66 +19,65 @@ class TestKVOperations(TestBase):
         assert meta is None
 
     @given(characters(blacklist_categories=["Cs", "Cc"]))
-    @settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
-    def test_get_key(self, etcd, string):
-        etcd.put("/doot/a_key", string)
-        returned, _ = etcd.get("/doot/a_key")
-        assert returned == string.encode("utf-8")
+    def test_get_key(self, string):
+        with self.get_clean_etcd() as etcd:
+            etcd.put("/doot/a_key", string)
+            returned, _ = etcd.get("/doot/a_key")
+            assert returned == string.encode("utf-8")
 
     @given(characters(blacklist_categories=["Cs", "Cc"]))
-    @settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
-    def test_get_random_key(self, etcd, string):
-        etcd.put("/doot/" + string, "dootdoot")
-        returned, _ = etcd.get("/doot/" + string)
-        assert returned == b"dootdoot"
+    def test_get_random_key(self, string):
+        with self.get_clean_etcd() as etcd:
+            etcd.put("/doot/" + string, "dootdoot")
+            returned, _ = etcd.get("/doot/" + string)
+            assert returned == b"dootdoot"
 
     @given(
         characters(blacklist_categories=["Cs", "Cc"]),
         characters(blacklist_categories=["Cs", "Cc"]),
     )
-    @settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
-    def test_get_key_serializable(self, etcd, key, string):
-        etcd.put("/doot/" + key, string)
-        from tests.conftest import _out_quorum
-        with _out_quorum():
-            returned, _ = etcd.get("/doot/" + key, serializable=True)
-        assert returned == string.encode("utf-8")
+    def test_get_key_serializable(self, key, string):
+        with self.get_clean_etcd() as etcd:
+            etcd.put("/doot/" + key, string)
+            with _out_quorum():
+                returned, _ = etcd.get("/doot/" + key, serializable=True)
+            assert returned == string.encode("utf-8")
 
     @given(characters(blacklist_categories=["Cs", "Cc"]))
-    @settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
-    def test_get_have_cluster_revision(self, etcd, string):
-        etcd.put("/doot/" + string, "dootdoot")
-        _, md = etcd.get("/doot/" + string)
-        assert md.response_header.revision > 0
+    def test_get_have_cluster_revision(self, string):
+        with self.get_clean_etcd() as etcd:
+            etcd.put("/doot/" + string, "dootdoot")
+            _, md = etcd.get("/doot/" + string)
+            assert md.response_header.revision > 0
 
     @given(characters(blacklist_categories=["Cs", "Cc"]))
-    @settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
-    def test_put_key(self, etcd, string):
-        etcd.put("/doot/put_1", string)
-        value, _ = etcd.get("/doot/put_1")
-        assert value == string.encode("utf-8")
+    def test_put_key(self, string):
+        with self.get_clean_etcd() as etcd:
+            etcd.put("/doot/put_1", string)
+            value, _ = etcd.get("/doot/put_1")
+            assert value == string.encode("utf-8")
 
     @given(characters(blacklist_categories=["Cs", "Cc"]))
-    @settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
-    def test_put_has_cluster_revision(self, etcd, string):
-        response = etcd.put("/doot/put_1", string)
-        assert response.header.revision > 0
+    def test_put_has_cluster_revision(self, string):
+        with self.get_clean_etcd() as etcd:
+            response = etcd.put("/doot/put_1", string)
+            assert response.header.revision > 0
 
     @given(characters(blacklist_categories=["Cs", "Cc"]))
-    @settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
-    def test_put_has_prev_kv(self, etcd, string):
-        etcd.put("/doot/put_1", "old_value")
-        response = etcd.put("/doot/put_1", string, prev_kv=True)
-        assert response.prev_kv.value == b"old_value"
+    def test_put_has_prev_kv(self, string):
+        with self.get_clean_etcd() as etcd:
+            etcd.put("/doot/put_1", "old_value")
+            response = etcd.put("/doot/put_1", string, prev_kv=True)
+            assert response.prev_kv.value == b"old_value"
 
     @given(characters(blacklist_categories=["Cs", "Cc"]))
-    @settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
-    def test_put_if_not_exists(self, etcd, string):
-        txn_status = etcd.put_if_not_exists("/doot/put_1", string)
-        assert txn_status is True
+    def test_put_if_not_exists(self, string):
+        with self.get_clean_etcd() as etcd:
+            txn_status = etcd.put_if_not_exists("/doot/put_1", string)
+            assert txn_status is True
 
-        txn_status = etcd.put_if_not_exists("/doot/put_1", string)
-        assert txn_status is False
+            txn_status = etcd.put_if_not_exists("/doot/put_1", string)
+            assert txn_status is False
 
     def test_delete_key(self, etcd):
         etcd.put("/doot/delete_this", "delete pls")

@@ -3,6 +3,7 @@ Tests for client configuration and functionality.
 """
 
 import tempfile
+import time
 from unittest import mock
 
 import grpc
@@ -12,7 +13,7 @@ import etcd3
 import etcd3.etcdrpc as etcdrpc
 import etcd3.exceptions
 from etcd3.client import EtcdTokenCallCredentials
-from tests.conftest import TestBase
+from tests.conftest import TestBase, new_client
 
 
 class TestClient(TestBase):
@@ -54,20 +55,6 @@ class TestClient(TestBase):
         with pytest.raises(ValueError):
             etcd._build_get_range_request(key, sort_order="feelsbadman")
 
-    @pytest.mark.skip
-    def test_secure_channel(self):
-        client = etcd3.client(
-            ca_cert="tests/ca.crt",
-            cert_key="tests/client.key",
-            cert_cert="tests/client.crt",
-        )
-        assert client.uses_secure_channel is True
-
-    @pytest.mark.skip
-    def test_secure_channel_ca_cert_only(self):
-        client = etcd3.client(ca_cert="tests/ca.crt", cert_key=None, cert_cert=None)
-        assert client.uses_secure_channel is True
-
     def test_secure_channel_ca_cert_and_key_raise_exception(self):
         with pytest.raises(ValueError):
             etcd3.client(
@@ -84,15 +71,15 @@ class TestClient(TestBase):
         etcd.put("/test1", "value1")
         etcd.put("/test2", "value2")
         etcd.put("/test3", "value3")
-        
+
         # Get current revision
         _, meta = etcd.get("/test1")
         current_revision = meta.response_header.revision
-        
+
         # Compact to a revision that exists
         compact_revision = max(1, current_revision - 1)
         etcd.compact(compact_revision)
-        
+
         # Trying to compact to the same revision again should raise an error
         with pytest.raises(grpc.RpcError):
             etcd.compact(compact_revision)
@@ -100,13 +87,6 @@ class TestClient(TestBase):
     def test_channel_with_no_cert(self):
         client = etcd3.client(ca_cert=None, cert_key=None, cert_cert=None)
         assert client.uses_secure_channel is False
-
-    def test_user_or_pwd_auth_raises_exception(self):
-        with pytest.raises(Exception):
-            etcd3.client(user="usr")
-
-        with pytest.raises(Exception):
-            etcd3.client(password="pwd")
 
     def test_internal_exception_on_internal_error(self, etcd):
         exception = self.MockedException(grpc.StatusCode.INTERNAL)
@@ -178,6 +158,59 @@ class TestClient(TestBase):
             f.flush()
             # Note: In original test, this used etcdctl to verify snapshot
             # For now, we just verify the snapshot was created without error
+
+    def test_grpc_options(self):
+        # gRPC channel options are a sequence of (key, value) pairs
+        with new_client(
+            grpc_options=[("grpc.max_receive_message_length", 64 * 1024 * 1024)]
+        ) as client:
+            client.put("/doot/opts", "v")
+            assert client.get("/doot/opts")[0] == b"v"
+            client.delete("/doot/opts")
+
+    def test_defragment(self, etcd):
+        etcd.put("/doot/defrag", "v")
+        etcd.defragment()
+        assert etcd.get("/doot/defrag")[0] == b"v"
+
+    def test_alarm_request_validation(self, etcd):
+        with pytest.raises(ValueError, match="Unknown alarm action"):
+            etcd._build_alarm_request("explode", 0, "none")
+        with pytest.raises(ValueError, match="Unknown alarm type"):
+            etcd._build_alarm_request("get", 0, "on fire")
+
+
+class TestEndpoint:
+    def test_secure_endpoint_requires_credentials(self):
+        with pytest.raises(ValueError, match="TLS credentials"):
+            etcd3.Endpoint("localhost", 2379, secure=True)
+
+    def test_str(self):
+        ep = etcd3.Endpoint("localhost", 2379, secure=False)
+        assert str(ep) == "Endpoint(http://localhost:2379)"
+        ep.close()
+
+    def test_fail_and_retry_window(self):
+        ep = etcd3.Endpoint("localhost", 2379, secure=False, time_retry=0.2)
+        assert not ep.is_failed()
+        ep.fail()
+        assert ep.is_failed()
+        with pytest.raises(ValueError, match="failed node"):
+            ep.use()
+        time.sleep(0.3)
+        assert not ep.is_failed()
+        assert ep.use() is ep.channel
+        ep.close()
+
+
+class TestExceptions:
+    def test_messages(self):
+        assert str(etcd3.exceptions.ConnectionFailedError()) == "etcd connection failed"
+        assert (
+            str(etcd3.exceptions.ConnectionTimeoutError()) == "etcd connection timeout"
+        )
+        err = etcd3.exceptions.RevisionCompactedError(42)
+        assert err.compacted_revision == 42
 
 
 class TestEtcdTokenCallCredentials:

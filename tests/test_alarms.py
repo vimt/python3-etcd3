@@ -2,9 +2,6 @@
 Tests for alarm functionality.
 """
 
-import pytest
-
-import etcd3
 import etcd3.etcdrpc as etcdrpc
 from tests.conftest import TestBase
 

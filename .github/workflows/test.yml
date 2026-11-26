@@ -6,77 +6,77 @@ on:
   pull_request:
     branches: [ master, main ]
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+env:
+  ETCD_VERSION: v3.5.17
 
+jobs:
+  lint:
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+
+    - uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}
-    
+        python-version: "3.12"
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -e ".[dev]"
-    
-    - name: Run unit tests
-      run: |
-        pytest tests/ -k "not TestEtcd3 and not TestAlarms and not TestFailoverClient and not test_user_pwd_auth and not test_compact" -v
-    
-    - name: Run linting
+
+    - name: Ruff
       run: |
         ruff check etcd3/ tests/
-    
-    - name: Run type checking
-      run: |
-        mypy etcd3/
+        ruff format --check etcd3/ tests/
 
-  integration-test:
-    runs-on: ubuntu-latest
-    services:
-      etcd:
-        image: quay.io/coreos/etcd:v3.4.10
-        env:
-          ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
-          ETCD_ADVERTISE_CLIENT_URLS: http://0.0.0.0:2379
-          ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
-          ETCD_INITIAL_ADVERTISE_PEER_URLS: http://0.0.0.0:2380
-          ETCD_INITIAL_CLUSTER: default=http://0.0.0.0:2380
-          ETCD_INITIAL_CLUSTER_TOKEN: etcd-cluster
-          ETCD_INITIAL_CLUSTER_STATE: new
-        ports:
-          - 2379:2379
-          - 2380:2380
+    - name: Type checking
+      run: mypy etcd3/
+
+  test:
+    name: test (py${{ matrix.python-version }}, protobuf ${{ matrix.protobuf }})
+    # ubuntu-22.04 still provides Python 3.8
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13"]
+        protobuf: ["latest"]
+        include:
+          # The generated etcdrpc/*_pb2.py need protobuf >= 5.29: test the floor
+          # declared in pyproject.toml so it cannot silently drift again.
+          - python-version: "3.8"
+            protobuf: "5.29.0"
+          - python-version: "3.12"
+            protobuf: "5.29.0"
 
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
       with:
-        python-version: "3.11"
-    
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install etcd ${{ env.ETCD_VERSION }}
+      run: |
+        curl -fsSL "https://github.com/etcd-io/etcd/releases/download/${ETCD_VERSION}/etcd-${ETCD_VERSION}-linux-amd64.tar.gz" | tar xz -C /tmp
+        echo "/tmp/etcd-${ETCD_VERSION}-linux-amd64" >> "$GITHUB_PATH"
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -e ".[dev]"
-    
-    - name: Wait for etcd
-      run: |
-        until curl -s http://localhost:2379/health; do
-          echo "Waiting for etcd..."
-          sleep 1
-        done
-    
-    - name: Run integration tests
-      run: |
-        PYTHON_ETCD_HTTP_URL=http://localhost:2379 pytest tests/ -k "TestEtcd3" -v --maxfail=5
+        pip install -e ".[dev]" pifpaf
+        if [ "${{ matrix.protobuf }}" != "latest" ]; then
+          pip install "protobuf==${{ matrix.protobuf }}"
+        fi
+        pip list | grep -iE "^(protobuf|grpcio) "
+
+    - name: Unit tests (no etcd)
+      run: pytest -m "not integration" -v --timeout=120
+
+    - name: All tests (3-node etcd cluster via pifpaf)
       env:
-        PYTHON_ETCD_HTTP_URL: http://localhost:2379
+        PYTHON_ETCD_HTTP_URL: http://127.0.0.1:2479
+      run: |
+        pifpaf run etcd --cluster --port 2479 --peer-port 2480 -- \
+          pytest -v --timeout=120 --cov=etcd3 --cov-report=term-missing

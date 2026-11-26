@@ -38,24 +38,25 @@ def _out_quorum():
         yield
 
 
-class TestBase:
-    @contextlib.contextmanager
-    def get_clean_etcd(self):
-        endpoint = os.environ.get("PYTHON_ETCD_HTTP_URL")
-        timeout = 5
-        if endpoint:
-            url = urlparse(endpoint)
-            with etcd3.client(host=url.hostname, port=url.port, timeout=timeout) as client:
-                self.delete_keys_definitely(client)
-                yield client
-        else:
-            with etcd3.client() as client:
-                self.delete_keys_definitely(client)
-                yield client
+def new_client(**kwargs):
+    """Create a client for the etcd under test (PYTHON_ETCD_HTTP_URL or default)."""
+    endpoint = os.environ.get("PYTHON_ETCD_HTTP_URL")
+    kwargs.setdefault("timeout", 5)
+    if endpoint:
+        url = urlparse(endpoint)
+        kwargs.setdefault("host", url.hostname)
+        kwargs.setdefault("port", url.port)
+    return etcd3.client(**kwargs)
 
-    @retry(wait=wait_fixed(2), stop=stop_after_attempt(3))
-    def delete_keys_definitely(self, client):
-        # clean up after fixture goes out of scope
+
+@retry(wait=wait_fixed(2), stop=stop_after_attempt(3))
+def delete_keys_definitely():
+    """Wipe all keys and alarms using a separate, fresh client.
+
+    A fresh client is used on purpose: tests that mock gRPC failures mark the
+    tested client's endpoint as failed, so it cannot be used for cleanup.
+    """
+    with new_client() as client:
         client.delete_prefix("/")
         # Also delete any keys without prefix
         for key, _ in client.get_all():
@@ -63,9 +64,24 @@ class TestBase:
         for alarm in client.list_alarms():
             client.disarm_alarm(alarm.member_id)
 
+
+def pytest_collection_modifyitems(items):
+    """Tests using the `etcd` fixture need a running etcd: mark them so that
+    `pytest -m "not integration"` runs without one."""
+    for item in items:
+        if "etcd" in getattr(item, "fixturenames", ()):
+            item.add_marker(pytest.mark.integration)
+
+
+class TestBase:
+    @contextlib.contextmanager
+    def get_clean_etcd(self):
+        delete_keys_definitely()
+        with new_client() as client:
+            yield client
+        delete_keys_definitely()
+
     @pytest.fixture
     def etcd(self):
         with self.get_clean_etcd() as etcd:
             yield etcd
-            # Clean up after test completes
-            self.delete_keys_definitely(etcd)

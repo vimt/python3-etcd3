@@ -9,7 +9,6 @@ import etcd3.etcdrpc as etcdrpc
 import etcd3.utils as utils
 from tests.conftest import TestBase
 
-
 etcd_version = "v3.5"  # Assume recent version for now
 
 
@@ -34,8 +33,40 @@ class TestTransactions(TestBase):
         value, _ = etcd.get("/doot/txn")
         assert value == b"failure"
 
+    def test_transaction_success_and_failure_are_optional(self, etcd):
+        etcd.put("/doot/txn-opt", "v")
+        status, responses = etcd.transaction(
+            compare=[etcd.transactions.value("/doot/txn-opt") == "v"],
+            success=[etcd.transactions.put("/doot/txn-opt", "only-success")],
+        )
+        assert status is True
+        assert etcd.get("/doot/txn-opt")[0] == b"only-success"
+
+        status, responses = etcd.transaction(
+            compare=[etcd.transactions.value("/doot/txn-opt") == "nope"],
+            failure=[etcd.transactions.get("/doot/txn-opt")],
+        )
+        assert status is False
+        assert responses[0][0][0] == b"only-success"
+
+        status, responses = etcd.transaction(compare=[])
+        assert status is True
+        assert responses == []
+
+    def test_nested_transaction_without_failure(self, etcd):
+        status, _ = etcd.transaction(
+            compare=[],
+            success=[
+                etcd.transactions.txn(
+                    compare=[], success=[etcd.transactions.put("/doot/nested", "x")]
+                )
+            ],
+        )
+        assert status is True
+        assert etcd.get("/doot/nested")[0] == b"x"
+
     def test_ops_to_requests(self, etcd):
-        with pytest.raises(Exception):
+        with pytest.raises(Exception, match="Unknown request class"):
             etcd._ops_to_requests(["not_transaction_type"])
         with pytest.raises(TypeError):
             etcd._ops_to_requests(0)
@@ -140,3 +171,14 @@ class TestCompares:
         create_compare = tx.create(key) > -12
         assert create_compare.op == etcdrpc.Compare.GREATER
         assert create_compare.build_message().target == etcdrpc.Compare.CREATE
+
+    def test_compare_repr(self):
+        tx = etcd3.Transactions()
+        assert repr(tx.value("/doot/k") == "v").endswith("/doot/k == 'v'")
+        assert repr(tx.version("/doot/k") != 1).endswith("/doot/k != '1'")
+        ranged = tx.mod("/doot/a", range_end="/doot/z") < 5
+        assert repr(ranged).endswith("[/doot/a, /doot/z) < '5'")
+
+    def test_compare_without_operator_raises(self):
+        with pytest.raises(ValueError, match="op must be one of"):
+            etcd3.Transactions().value("/doot/k").build_message()
