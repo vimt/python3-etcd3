@@ -5,6 +5,8 @@ on:
     branches: [ master, main ]
   pull_request:
     branches: [ master, main ]
+  # publish.yml runs the tests before publishing
+  workflow_call:
 
 env:
   ETCD_VERSION: v3.5.17
