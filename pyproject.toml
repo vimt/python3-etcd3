@@ -50,7 +50,8 @@ dev = [
     "tenacity",
     "mypy",
     "types-protobuf",
-    "types-grpcio",
+    # types-grpcio needs Python >= 3.9; mypy only runs on newer Pythons anyway
+    "types-grpcio; python_version >= '3.9'",
     "ruff",
 ]
 
