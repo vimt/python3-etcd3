@@ -159,6 +159,7 @@ class TestClient(TestBase):
             # Note: In original test, this used etcdctl to verify snapshot
             # For now, we just verify the snapshot was created without error
 
+    @pytest.mark.integration
     def test_grpc_options(self):
         # gRPC channel options are a sequence of (key, value) pairs
         with new_client(
