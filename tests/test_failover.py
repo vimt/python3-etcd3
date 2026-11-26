@@ -8,10 +8,10 @@ from urllib.parse import urlparse
 
 import grpc
 import pytest
-from tenacity import retry, stop_after_attempt, wait_fixed
 
 import etcd3
 import etcd3.exceptions
+from tests.conftest import delete_keys_definitely
 
 
 @pytest.mark.skipif(
@@ -41,12 +41,7 @@ class TestFailoverClient:
         ) as client:
             yield client
 
-        @retry(wait=wait_fixed(2), stop=stop_after_attempt(3))
-        def delete_keys_definitely():
-            # clean up after fixture goes out of scope
-            with etcd3.client() as cleanup_client:
-                cleanup_client.delete_prefix("/")
-
+        # clean up after fixture goes out of scope
         delete_keys_definitely()
 
     def test_endpoint_offline(self, etcd):
