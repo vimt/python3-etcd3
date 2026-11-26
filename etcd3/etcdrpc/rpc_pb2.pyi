@@ -1,5 +1,5 @@
-import kv_pb2 as _kv_pb2
-import auth_pb2 as _auth_pb2
+from . import kv_pb2 as _kv_pb2
+from . import auth_pb2 as _auth_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor

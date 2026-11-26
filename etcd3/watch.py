@@ -1,54 +1,103 @@
 import logging
 import queue
 import threading
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    TypedDict,
+    Union,
+)
 
 import grpc
 
 from . import etcdrpc, events, exceptions, utils
+from .utils import BytesOrStr
+
+if TYPE_CHECKING:
+    from .client import MultiEndpointEtcd3Client
+
+
+class WatchOptions(TypedDict, total=False):
+    """Keyword arguments accepted by the watch methods."""
+
+    range_end: Optional[BytesOrStr]
+    start_revision: Optional[int]
+    progress_notify: bool
+    filters: Optional[Iterable["etcdrpc.WatchCreateRequest.FilterType"]]
+    prev_kv: bool
+
 
 _log = logging.getLogger(__name__)
 
+#: What a watch callback receives: a `WatchResponse`, or the error (gRPC
+#: error, :class:`.RevisionCompactedError`) that ended the watch, or None when
+#: the watch stream ended without an error.
+WatchCallbackArg = Union["WatchResponse", Exception, None]
+WatchCallback = Callable[[WatchCallbackArg], Any]
+Metadata = Optional[Tuple[Tuple[str, Union[str, bytes]], ...]]
+
 
 class Watch:
-    def __init__(self, watch_id, iterator=None, etcd_client=None):
+    def __init__(
+        self,
+        watch_id: int,
+        iterator: Optional[Iterator[Any]] = None,
+        etcd_client: Optional["MultiEndpointEtcd3Client"] = None,
+    ) -> None:
         self.watch_id = watch_id
         self.etcd_client = etcd_client
-        self.iterator = iterator
+        self.iterator = iterator  # type: ignore[method-assign,assignment]
 
-    def cancel(self):
-        self.etcd_client.cancel_watch(self.watch_id)
+    def cancel(self) -> None:
+        if self.etcd_client is not None:
+            self.etcd_client.cancel_watch(self.watch_id)
 
-    def iterator(self):
+    def iterator(self) -> Iterator[Any]:
         if self.iterator is not None:
-            return self.iterator
+            return self.iterator  # type: ignore[return-value]
 
         raise ValueError("Undefined iterator")
 
 
 class Watcher:
-    def __init__(self, watchstub, timeout=None, call_credentials=None, metadata=None):
+    def __init__(
+        self,
+        watchstub: etcdrpc.WatchStub,
+        timeout: Optional[float] = None,
+        call_credentials: Optional[grpc.CallCredentials] = None,
+        metadata: Metadata = None,
+    ) -> None:
         self.timeout = timeout
         self._watch_stub = watchstub
         self._credentials = call_credentials
         self._metadata = metadata
 
         self._lock = threading.Lock()
-        self._request_queue = queue.Queue(maxsize=10)
-        self._callbacks = {}
-        self._callback_thread = None
+        self._request_queue: queue.Queue[Optional[etcdrpc.WatchRequest]] = queue.Queue(
+            maxsize=10
+        )
+        self._callbacks: Dict[int, WatchCallback] = {}
+        self._callback_thread: Optional[threading.Thread] = None
         self._new_watch_cond = threading.Condition(lock=self._lock)
-        self._new_watch = None
+        self._new_watch: Optional[_NewWatch] = None
         self._stopping = False
 
     def _create_watch_request(
         self,
-        key,
-        range_end=None,
-        start_revision=None,
-        progress_notify=False,
-        filters=None,
-        prev_kv=False,
-    ):
+        key: BytesOrStr,
+        range_end: Optional[BytesOrStr] = None,
+        start_revision: Optional[int] = None,
+        progress_notify: bool = False,
+        filters: Optional[Iterable["etcdrpc.WatchCreateRequest.FilterType"]] = None,
+        prev_kv: bool = False,
+    ) -> etcdrpc.WatchRequest:
         create_watch = etcdrpc.WatchCreateRequest()
         create_watch.key = utils.to_bytes(key)
         if range_end is not None:
@@ -65,14 +114,14 @@ class Watcher:
 
     def add_callback(
         self,
-        key,
-        callback,
-        range_end=None,
-        start_revision=None,
-        progress_notify=False,
-        filters=None,
-        prev_kv=False,
-    ):
+        key: BytesOrStr,
+        callback: WatchCallback,
+        range_end: Optional[BytesOrStr] = None,
+        start_revision: Optional[int] = None,
+        progress_notify: bool = False,
+        filters: Optional[Iterable["etcdrpc.WatchCreateRequest.FilterType"]] = None,
+        prev_kv: bool = False,
+    ) -> int:
         rq = self._create_watch_request(
             key,
             range_end=range_end,
@@ -85,6 +134,7 @@ class Watcher:
         with self._lock:
             # Wait for exiting thread to close
             if self._stopping:
+                assert self._callback_thread is not None
                 self._callback_thread.join()
                 self._callback_thread = None
                 self._stopping = False
@@ -125,9 +175,10 @@ class Watcher:
                 self._new_watch = None
                 self._new_watch_cond.notify_all()
 
+            assert new_watch.id is not None
             return new_watch.id
 
-    def cancel(self, watch_id):
+    def cancel(self, watch_id: int) -> None:
         with self._lock:
             callback = self._callbacks.pop(watch_id, None)
             if not callback:
@@ -135,8 +186,8 @@ class Watcher:
 
             self._cancel_no_lock(watch_id)
 
-    def _run(self):
-        callback_err = None
+    def _run(self) -> None:
+        callback_err: Optional[Exception] = None
         try:
             response_iter = self._watch_stub.Watch(
                 _new_request_iter(self._request_queue),
@@ -168,7 +219,7 @@ class Watcher:
             for callback in callbacks.values():
                 _safe_callback(callback, callback_err)
 
-    def _handle_response(self, rs):
+    def _handle_response(self, rs: etcdrpc.WatchResponse) -> None:
         with self._lock:
             if rs.created:
                 # If the new watch request has already expired then cancel the
@@ -211,32 +262,36 @@ class Watcher:
             response = WatchResponse(rs.header, new_events)
             _safe_callback(callback, response)
 
-    def _cancel_no_lock(self, watch_id):
+    def _cancel_no_lock(self, watch_id: int) -> None:
         cancel_watch = etcdrpc.WatchCancelRequest()
         cancel_watch.watch_id = watch_id
         rq = etcdrpc.WatchRequest(cancel_request=cancel_watch)
         self._request_queue.put(rq)
 
-    def close(self):
+    def close(self) -> None:
         with self._lock:
             if self._callback_thread and not self._stopping:
                 self._request_queue.put(None)
 
 
 class WatchResponse:
-    def __init__(self, header, events):
+    def __init__(
+        self, header: etcdrpc.ResponseHeader, events: List[events.Event]
+    ) -> None:
         self.header = header
         self.events = events
 
 
 class _NewWatch:
-    def __init__(self, callback):
+    def __init__(self, callback: WatchCallback) -> None:
         self.callback = callback
-        self.id = None
-        self.err = None
+        self.id: Optional[int] = None
+        self.err: Optional[Exception] = None
 
 
-def _new_request_iter(_request_queue):
+def _new_request_iter(
+    _request_queue: "queue.Queue[Optional[etcdrpc.WatchRequest]]",
+) -> Iterator[etcdrpc.WatchRequest]:
     while True:
         rq = _request_queue.get()
         if rq is None:
@@ -245,7 +300,7 @@ def _new_request_iter(_request_queue):
         yield rq
 
 
-def _safe_callback(callback, response_or_err):
+def _safe_callback(callback: WatchCallback, response_or_err: WatchCallbackArg) -> None:
     try:
         callback(response_or_err)
 

@@ -1,4 +1,7 @@
-from typing import List
+from typing import TYPE_CHECKING, Iterator, List, Optional
+
+if TYPE_CHECKING:
+    from .client import Alarm, MultiEndpointEtcd3Client
 
 
 class Member:
@@ -19,13 +22,19 @@ class Member:
         name: str,
         peer_urls: List[str],
         client_urls: List[str],
-        etcd_client=None,
-    ):
+        etcd_client: Optional["MultiEndpointEtcd3Client"] = None,
+    ) -> None:
         self.id = id
         self.name = name
         self.peer_urls = peer_urls
         self.client_urls = client_urls
         self._etcd_client = etcd_client
+
+    @property
+    def _client(self) -> "MultiEndpointEtcd3Client":
+        if self._etcd_client is None:
+            raise ValueError("This member is not bound to an etcd client")
+        return self._etcd_client
 
     def __str__(self) -> str:
         return (
@@ -35,7 +44,7 @@ class Member:
 
     def remove(self) -> None:
         """Remove this member from the cluster."""
-        self._etcd_client.remove_member(self.id)
+        self._client.remove_member(self.id)
 
     def update(self, peer_urls: List[str]) -> None:
         """
@@ -44,12 +53,12 @@ class Member:
         :param peer_urls: new list of peer urls the member will use to
                           communicate with the cluster
         """
-        self._etcd_client.update_member(self.id, peer_urls)
+        self._client.update_member(self.id, peer_urls)
 
     @property
-    def active_alarms(self):
+    def active_alarms(self) -> Iterator["Alarm"]:
         """Get active alarms of the member.
 
         :returns: Alarms
         """
-        return self._etcd_client.list_alarms(member_id=self.id)
+        return self._client.list_alarms(member_id=self.id)

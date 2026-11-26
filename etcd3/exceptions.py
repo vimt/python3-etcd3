@@ -11,12 +11,12 @@ class InternalServerError(Etcd3Exception):
 
 
 class ConnectionFailedError(Etcd3Exception):
-    def __str__(self):
+    def __str__(self) -> str:
         return "etcd connection failed"
 
 
 class ConnectionTimeoutError(Etcd3Exception):
-    def __str__(self):
+    def __str__(self) -> str:
         return "etcd connection timeout"
 
 
@@ -25,7 +25,7 @@ class PreconditionFailedError(Etcd3Exception):
 
 
 class RevisionCompactedError(Etcd3Exception):
-    def __init__(self, compacted_revision):
+    def __init__(self, compacted_revision: int) -> None:
         self.compacted_revision = compacted_revision
         super().__init__()
 

@@ -9,8 +9,9 @@ A Python client library for etcd version 3, modernized for Python 3.8+.
 The original project has not been actively maintained and had compatibility issues with newer Python versions and gRPC. This fork provides:
 
 - **Python 3.8+ compatibility** (removed Python 2 support)
-- **Modern Python syntax** with type annotations
+- **Modern Python syntax** with complete type annotations (ships `py.typed`, checked with `mypy --strict`), including typed gRPC stubs
 - **Updated gRPC compatibility** for newer versions
+- **Regenerated protobuf bindings** for protobuf 5.29+ — fixes `TypeError: Descriptors cannot be created directly` raised by the original package with newer protobuf
 - **Modern packaging** with pyproject.toml
 - **Code quality improvements** with ruff formatting
 
@@ -56,7 +57,7 @@ for event in watch_iterator:
 
 - Python 3.8+
 - grpcio
-- protobuf
+- protobuf >= 5.29
 
 ## Contributing
 
